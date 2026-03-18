@@ -155,6 +155,16 @@ envのGUI上で定義しておくことで、
 環境が変わった際に、
 プログラムを開かずともスムーズにメンテナンスできる。
 
+変数名を「DEST_DIR」と定義した場合、スクリプト上では、
+tx.saveFile(`${$env.DEST_DIR}\\${fileName}`, content);
+のように参照することができます。
+
+また、envで定義した変数は、
+他のコンテキストのパスを扱う項目で、
+%のブレースフォルダで囲うことで、
+%WORKSPACE%\testApp\src\
+のように参照することができます。
+
 envの＋ボタン押下時は、以下の状態となる。
 screen_shot/env追加時.JPG
 
@@ -559,3 +569,191 @@ screen_shot/プログラム実行時（出力結果）.JPG
 画面下部のCancelボタンを押下するか、
 Alt+左キーで、実行取り消しし、
 ソースコード編集に戻る。
+
+■独自API「$state」について
+「$state」APIは、スクリプト実行時に、
+GUIにプログレスバーや、モニター（固定文字）を表示することができる。
+
+例えばデータセットで定義した数1000のファイルを、
+順番にオープンして解析していく処理において、
+実行完了までに5分ほどかかる場合、
+実行中は「Executing...」の表示しかされない。
+screen_shot/スクリプト実行中.JPG
+
+いつ終わるのか、今どこを解析しているのか、
+$printで出力しないと状況がわからない。
+
+そこで、このAPIを用いることで簡単にプログレスバーを表示できる。
+$state.useProgress(totalCount)
+を実行することで、指定の母数のプログレスバーを、
+GUIに表示することを宣言し、
+操作するためのハンドルを取得できる。
+
+ハンドルのプロパティであるtick()関数で、
+プログレスを1つ進めることができる。
+使い方は以下のようになる。
+
+const {tick} = $state.useProgress($dataset.files.length);
+for(const d of $dataset.files) {
+  // 処理
+  tick(); // プログレスバー加算
+}
+
+このように、
+・プログレスバーの宣言
+・加算関数呼び出し
+の2行を追加するだけで、
+簡単にプログレスバーを実行中の画面に表示できる。
+screen_shot/スクリプト実行中（プログレスバー）.JPG
+
+
+また、条件に一致したファイルの件数（実行中にリアルタイム更新）や、
+解析中のファイルを、実行中に確認したい場合は、
+モニターを使えば簡単に実現できる。
+
+モニターは、$state.useMonitor()関数で宣言し、
+引数で利用するモニター数を指定することで、
+指定した数だけ、モニターの更新関数を配列で返すようになっている。
+
+例えば、条件に一致した合計数と、解析中のファイル名を、
+モニターで画面に固定表示（リアルタイムで更新）したい場合、
+以下のように2つ確保し、分割代入で更新関数を取得する。
+const [summary, current] = $state.useMonitor(2);
+
+取得した関数は、
+summary(`パターン一致件数： ${matchCnt}件`);
+current(`解析中のファイル： [${d.fileName}]`);
+のように関数として実行することで、画面に文字列を取得する。
+screen_shot/スクリプト実行中（モニター）.JPG
+
+■独自API「$fs」について
+ファイルシステムへの読み書きを行う関数群を提供する。
+
+$fs.exists(`${DIR}\\targetFile.txt`)
+のように各APIを呼び出せる。
+
+exists: (path: string) => Promise<boolean>;
+→パスの存在チェック
+glob: (pattern: string) => Promise<string[]>;
+→パターンのパス一覧を取得
+stat: (path: string) => Promise<FileStat>;
+→作成日、更新日、ファイルサイズを取得
+readDir: (dir: string) => Promise<{ name: string; isDir: boolean; }[]>;
+→ディレクトリを読み込み、配下の要素一覧を返す
+readBinary: (filePath: string) => Promise<ArrayBuffer>;
+→バイナリを読み込む
+readText: (filePath: string, encoding: 'utf8' | 'sjis') => Promise<string>;
+→テキストを読み込む
+saveText: (filePath: string, content: string) => Promise<void>;
+→テキストを保存（書き込み）
+copyFile: (src: string, dest: string) => Promise<void>;
+→ファイルをバイナリコピーする
+makeDir: (dirPath: string) => Promise<void>;
+→ディレクトリを作成（存在することを保証）
+deleteFile: (filePath: string) => Promise<void>;
+→ファイルを削除
+deleteDir: (dirPath: string) => Promise<void>;
+→ディレクトリを削除（中身が空の場合のみ可能）
+renameFile: (targetFilePath: string, newFileName: string) => Promise<void>;
+→ファイル名変更（同ディレクトリ内のみ）
+renameDir: (targetDirPath: string, newDirName: string) => Promise<void>;
+→ディレクトリ名変更（同ディレクトリ内のみ）
+
+
+上記は非同期で即FSに読み書きをするのに対し、
+仮想FS上に論理操作を積み、トランザクションで処理することを可能とする、
+
+useTransaction: () => DclFSTransaction.TransactionAPI;
+が存在する。
+
+実行すると、トランザクション利用を宣言し、
+仮想FSに書き込むためのハンドル（API群）を取得する。
+
+const tx = $fs.useTransaction();
+
+tx.openText(`${DIR}\\targetFile.txt`, 'utf8');
+のように使える。
+
+トランザクションAPIは以下が存在する。
+書き込み系は処理のオーダーを積むだけなので、
+同期処理で書けるのが特徴。
+
+openText: (filePath: string, encorde: "utf8" | "sjis") => Promise<{ token: RuntimeUtil.FileToken; content: string; }>;
+→
+テキストを読み込み、中身の文字列とファイルトークンを取得する。
+この関数を呼び出すと、指定したパスはチェックアウト状態となり、
+トークン経由でしか、変更操作（更新・削除・リネーム）できない。
+
+saveText: (filePath: string, content: string) => void;
+→テキストファイルを新たに作成する。
+
+updateText: (token: RuntimeUtil.FileToken, content: string) => void;
+→テキストを更新する。openTextとペアで利用する。
+
+copyFile: (from: string, dest: string) => void;
+→ファイルをコピーする。
+
+deleteFile: (filePath: string) => void;
+→ファイルを削除する。
+
+deleteFileByToken: (token: RuntimeUtil.FileToken) => void;
+→トークン経由でファイルを削除する。
+
+renameFile: (targetFilePath: string, newFileName: string) => void;
+→ファイル名を変更する。
+
+renameFileByToken: (token: RuntimeUtil.FileToken, newName: string) => void;
+→トークン経由でファイル名を変更する。
+
+
+トランザクションAPIはスクリプト実行時に、
+論理整合性を担保する設計になっている。
+
+オープンしたパスに対して、
+直接ファイル操作（保存、削除、リネーム、再読み込み）を行った場合、
+ランタイムエラーとなる。
+
+
+トランザクションAPIの重要なポイントとして、
+useTransactionは、トランザクションの開始ではなく、
+利用することの宣言である。
+
+useTransactionを呼び、ハンドル経由で仮想FSに書き込みオーダーを積むと、
+プログラム実行終了時に、トランザクションダイアログを表示する。
+screen_shot/トランザクションダイアログ.JPG
+
+トランザクションダイアログでは、
+以下の状態を管理している。
+１．confirm：確認フェーズ
+２．verify：検証フェーズ（変更可否のチェック）
+３．commit：処理済み
+
+１．confirmでは、
+仮想FSのオーダー内容に問題がないか確認できる。
+ファイル名を押下することで、変更内容を確認することができる。
+screen_shot/書き込み内容確認.JPG
+screen_shot/更新内容確認.JPG
+
+問題ない場合、右下のコミットボタンを押下することで、
+２．verifyに進む。
+
+検証フェーズでは、
+実FSをチェックし、変更可否のチェックを行う。
+・ファイル作成しようとしたディレクトリが存在しない
+・更新しようとしたファイルが存在しない
+・書き込み権限がない
+などの問題や不整合が発生した場合、
+ここでエラーとなり、実FSの変更処理は行わない。
+
+1つもエラーが発生しなかった場合、
+実FSへの変更処理が実行される。
+screen_shot/書き込み完了.JPG
+
+・ランタイム：仮想FSにて論理整合を検証
+・トランザクション：目視での認識合わせと、実FS変更可否を検証
+
+このワークフローにより、
+実装ミスにより意図していないFS変更や、
+途中までFS変更が実行されて、
+中途半端な状態で止まるといった問題を解消し、
+安全で間違いのないFS操作を実現する。

@@ -757,3 +757,40 @@ screen_shot/書き込み完了.JPG
 途中までFS変更が実行されて、
 中途半端な状態で止まるといった問題を解消し、
 安全で間違いのないFS操作を実現する。
+
+
+■独自API「$channel」について
+コンテキスト要素（work）の管理にて、
+output_methodで「plain」「channel」が選択できるが、
+ここでchannelを選択すると、
+通常の$print（$println）は注入されず、
+代わりにチャンネルAPIを利用できるようになる。
+
+チャンネルAPIは、出力対象のストリームを任意で生成し、
+ストリーム生成時に取得するハンドルを経由して、
+任意のストリームに対して出力を行うことができる。
+
+ストリームを複数生成した場合、
+実行結果画面で、ストリームを選択し、
+ストリームごとに出力結果を確認することができる。
+
+ストリームは以下のように生成する。
+const log = $channel.createTextStream('log');
+log.println('hello');
+screen_shot/チャンネルストリーム出力.JPG
+
+また、チャンネルAPIでは純粋なテキストだけでなく、
+テーブル形式のストリームを生成することも可能。
+以下のように、テーブルの列項目を定義を定義し、
+add関数で定義したオブジェクトを補完付きで挿入することができる。
+const report = $channel.createTableStream('report', [
+    { name: 'id' },
+    { name: 'name' },
+    { name: 'age', type: 'number' },
+]);
+report.add({ id: '001', name: 'taro', age: 22 });
+report.add({ id: '002', name: 'jiro', age: 21 });
+report.add({ id: '002', name: 'hana', age: 18 });
+
+出力結果はテーブルで参照できる。
+screen_shot/テーブルストリーム出力.JPG
